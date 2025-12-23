@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { storageService } from '../services/storage';
@@ -25,12 +24,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const initAuth = async () => {
-        // Check local storage for persistent login session simulation
         const storedUser = localStorage.getItem('currentUser');
         if (storedUser) {
           const parsedUser = JSON.parse(storedUser);
-          // Verify user still exists in DB
           try {
+             // Verify user still exists in cloud DB and is active
              const users = await storageService.getUsers();
              const found = users.find(u => u.id === parsedUser.id);
              if (found && found.isActive) {
@@ -52,17 +50,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const users = await storageService.getUsers();
         const found = users.find(u => u.email === email);
         
-        if (!found) {
-          return { success: false, message: 'User not found' };
-        }
-
-        if (!found.isActive) {
-          return { success: false, message: 'Account is deactivated. Contact Admin.' };
-        }
-
-        if (found.password !== password) {
-          return { success: false, message: 'Invalid credentials' };
-        }
+        if (!found) return { success: false, message: 'User not found' };
+        if (!found.isActive) return { success: false, message: 'Account is deactivated. Contact Admin.' };
+        if (found.password !== password) return { success: false, message: 'Invalid credentials' };
 
         setUser(found);
         localStorage.setItem('currentUser', JSON.stringify(found));

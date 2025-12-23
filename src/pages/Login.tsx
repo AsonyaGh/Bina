@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Mail, RefreshCw } from 'lucide-react';
@@ -22,13 +21,10 @@ export const Login: React.FC = () => {
       setError(result.message || 'Login failed');
       setIsSubmitting(false);
     }
-    // If success, AuthContext state update will trigger redirect automatically
   };
 
   const handleReset = async () => {
-    // In cloud version, this button is less relevant or dangerous
-    // We keep it to re-trigger seed check if DB is empty
-    if (confirm("Reset connection and check for data seeding?")) {
+    if (confirm("Check connection and re-seed database if empty?")) {
       await storageService.init();
       location.reload();
     }
@@ -103,7 +99,7 @@ export const Login: React.FC = () => {
               title="Reset Database"
             >
               <RefreshCw size={12} className="mr-1" />
-              Init/Seed Database
+              Check/Seed Database
             </button>
           </div>
         </div>

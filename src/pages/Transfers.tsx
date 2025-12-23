@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storage';
 import { Transfer, TransferStatus, Role, Location, Motorcycle, MotorcycleStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Check, Truck, ArrowRight, XCircle, ShieldCheck } from 'lucide-react';
+import { Plus, Check, Truck, ArrowRight, XCircle, ShieldCheck, RefreshCw } from 'lucide-react';
 
 export const Transfers: React.FC = () => {
   const { user } = useAuth();
@@ -124,16 +123,25 @@ export const Transfers: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Stock Transfers</h1>
-        {(user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.ADMIN || user?.role === Role.BRANCH_MANAGER) && (
-          <button 
-            onClick={() => setShowModal(true)}
-            className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
-            title="Create New Transfer"
-          >
-            <Plus size={18} className="mr-2" />
-            New Transfer
-          </button>
-        )}
+        <div className="flex gap-2">
+            <button 
+                onClick={() => refreshData()}
+                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg dark:text-gray-300 dark:hover:bg-gray-700"
+                title="Refresh Transfers"
+            >
+                <RefreshCw size={20} />
+            </button>
+            {(user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.ADMIN || user?.role === Role.BRANCH_MANAGER) && (
+            <button 
+                onClick={() => setShowModal(true)}
+                className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
+                title="Create New Transfer"
+            >
+                <Plus size={18} className="mr-2" />
+                New Transfer
+            </button>
+            )}
+        </div>
       </div>
 
       <div className="grid gap-4">
@@ -168,7 +176,6 @@ export const Transfers: React.FC = () => {
             </div>
             
             <div className="flex gap-2">
-                {/* 1. APPROVAL STEP (Only if Pending Approval) */}
                 {t.status === TransferStatus.PENDING_APPROVAL && (
                     <>
                         {user?.role === Role.ADMIN ? (
@@ -188,10 +195,8 @@ export const Transfers: React.FC = () => {
                     </>
                 )}
 
-                {/* 2. CONFIRM RECEIPT STEP (Only if Pending/In Transit) */}
                 {t.status === TransferStatus.PENDING && (
                     <>
-                        {/* Admin OR Destination Branch Manager can Confirm */}
                         {((user?.role === Role.BRANCH_MANAGER && t.toLocationId === user.locationId) || user?.role === Role.ADMIN) && (
                             <button 
                                 onClick={() => handleReceive(t.id)}
@@ -205,7 +210,6 @@ export const Transfers: React.FC = () => {
                     </>
                 )}
                 
-                {/* 3. CANCEL STEP (Admin can always cancel pending stuff) */}
                 {user?.role === Role.ADMIN && (t.status === TransferStatus.PENDING || t.status === TransferStatus.PENDING_APPROVAL) && (
                         <button 
                         onClick={() => handleCancel(t.id)}
@@ -236,7 +240,7 @@ export const Transfers: React.FC = () => {
                       value={selectedFromLocation} 
                       onChange={e => {
                           setSelectedFromLocation(e.target.value);
-                          setSelectedBikes([]); // Reset selected bikes when location changes
+                          setSelectedBikes([]); 
                       }}
                       className="w-full p-2 border border-gray-600 rounded-lg bg-gray-700 text-white"
                     >
@@ -248,7 +252,6 @@ export const Transfers: React.FC = () => {
                   </div>
               )}
 
-              {/* Managers have locked origin, show it as text */}
               {user?.role !== Role.ADMIN && (
                    <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                       <span className="text-xs text-gray-500 uppercase block mb-1">Origin</span>

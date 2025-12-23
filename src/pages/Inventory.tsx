@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storage';
 import { Motorcycle, MotorcycleStatus, Role, Location } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Search, Filter, Edit2, Trash2, X } from 'lucide-react';
+import { Plus, Search, Filter, Edit2, Trash2 } from 'lucide-react';
 
 export const Inventory: React.FC = () => {
   const { user } = useAuth();
@@ -49,8 +48,6 @@ export const Inventory: React.FC = () => {
 
     // Determine import location
     let importLocationId = user.locationId;
-    
-    // If Admin, they must select a location
     if (user.role === Role.ADMIN) {
       if (!targetLocationId) {
         alert("Please select a target warehouse.");
@@ -82,11 +79,7 @@ export const Inventory: React.FC = () => {
     e.preventDefault();
     if (!editingBike || !user) return;
 
-    const updatedBike = {
-        ...editingBike,
-        type: newType,
-        color: newColor
-    };
+    const updatedBike = { ...editingBike, type: newType, color: newColor };
     
     await storageService.updateMotorcycle(updatedBike);
     await storageService.logAction(user.id, `Updated details for bike ${editingBike.chassisNumber}`);
@@ -154,7 +147,6 @@ export const Inventory: React.FC = () => {
         )}
       </div>
 
-      {/* Filter Bar */}
       <div className="flex items-center space-x-4 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
@@ -166,15 +158,9 @@ export const Inventory: React.FC = () => {
             className="w-full pl-10 pr-4 py-2 border border-gray-600 rounded-lg bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500 placeholder-gray-400"
           />
         </div>
-        <button 
-            className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-            title="Filter Options"
-        >
-          <Filter size={20} />
-        </button>
+        <button className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><Filter size={20} /></button>
       </div>
 
-      {/* Table */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -211,31 +197,20 @@ export const Inventory: React.FC = () => {
                   <td className="px-6 py-4 text-gray-600 dark:text-gray-300">{new Date(bike.importDate).toLocaleDateString()}</td>
                   {(canEdit || canDelete) && (
                       <td className="px-6 py-4 flex items-center justify-center gap-2">
-                        {canEdit && (
-                            <button onClick={() => openEditModal(bike)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Edit Details">
-                                <Edit2 size={16} />
-                            </button>
-                        )}
-                        {canDelete && (
-                            <button onClick={() => handleDeleteBike(bike.chassisNumber)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Delete Stock">
-                                <Trash2 size={16} />
-                            </button>
-                        )}
+                        {canEdit && <button onClick={() => openEditModal(bike)} className="p-1 text-blue-600 hover:bg-blue-50 rounded"><Edit2 size={16} /></button>}
+                        {canDelete && <button onClick={() => handleDeleteBike(bike.chassisNumber)} className="p-1 text-red-600 hover:bg-red-50 rounded"><Trash2 size={16} /></button>}
                       </td>
                   )}
                 </tr>
               ))}
               {!loading && filteredBikes.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">No motorcycles found.</td>
-                </tr>
+                <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">No motorcycles found.</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Add Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md p-6">
@@ -257,12 +232,7 @@ export const Inventory: React.FC = () => {
               {user?.role === Role.ADMIN && (
                  <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Target Warehouse</label>
-                    <select 
-                      required 
-                      value={targetLocationId} 
-                      onChange={e => setTargetLocationId(e.target.value)} 
-                      className="w-full p-2 border border-gray-600 rounded-lg bg-gray-700 text-white"
-                    >
+                    <select required value={targetLocationId} onChange={e => setTargetLocationId(e.target.value)} className="w-full p-2 border border-gray-600 rounded-lg bg-gray-700 text-white">
                       <option value="">Select Warehouse</option>
                       {locations.filter(l => l.type === 'WAREHOUSE').map(l => (
                         <option key={l.id} value={l.id}>{l.name}</option>
@@ -280,7 +250,6 @@ export const Inventory: React.FC = () => {
         </div>
       )}
 
-      {/* Edit Modal */}
       {showEditModal && editingBike && (
          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md p-6">
@@ -289,7 +258,6 @@ export const Inventory: React.FC = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Chassis Number</label>
                 <input disabled type="text" value={newChassis} className="w-full p-2 border border-gray-600 rounded-lg bg-gray-700 text-gray-400 cursor-not-allowed" />
-                <p className="text-xs text-gray-500 mt-1">Chassis number cannot be changed once imported.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type/Model</label>

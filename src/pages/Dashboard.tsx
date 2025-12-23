@@ -1,10 +1,9 @@
-
 import React, { useMemo, useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { storageService } from '../services/storage';
 import { MotorcycleStatus, Role, Motorcycle, Sale } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line } from 'recharts';
-import { TrendingUp, AlertCircle, Package, MapPin } from 'lucide-react';
+import { TrendingUp, AlertCircle, Package } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
@@ -41,9 +40,7 @@ export const Dashboard: React.FC = () => {
     }
 
     const totalStock = filteredBikes.filter(b => b.status !== MotorcycleStatus.SOLD).length;
-    
-    // Simulate some sales logic
-    const salesCount = sales.length; // Simplified for demo
+    const salesCount = sales.length;
     
     return {
       totalStock,
@@ -60,15 +57,12 @@ export const Dashboard: React.FC = () => {
         [MotorcycleStatus.SOLD]: 0,
     };
     bikes.forEach(b => {
-        if (statusCounts[b.status] !== undefined) {
-            statusCounts[b.status]++;
-        }
+        if (statusCounts[b.status] !== undefined) statusCounts[b.status]++;
     });
     return Object.keys(statusCounts).map(key => ({ name: key.replace('_', ' '), value: statusCounts[key as MotorcycleStatus] }));
   }, [bikes]);
 
   const salesTrendData = useMemo(() => {
-      // Mock trend data based on sales (grouped by date)
       return [
           { name: 'Jan', sales: 4 },
           { name: 'Feb', sales: 7 },
@@ -81,7 +75,7 @@ export const Dashboard: React.FC = () => {
 
   const COLORS = ['#ef4444', '#3b82f6', '#f59e0b', '#10b981'];
 
-  if (loading) return <div className="p-6 text-center text-gray-500">Loading dashboard data...</div>;
+  if (loading) return <div className="p-6 text-center text-gray-500">Loading dashboard...</div>;
 
   return (
     <div className="space-y-6">

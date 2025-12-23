@@ -38,7 +38,7 @@ const load = (key: string, def: any) => {
 // Data Service
 export const storageService = {
   // Initialization
-  init: () => {
+  init: async () => {
     const usersRaw = localStorage.getItem('users');
     let needsRefresh = false;
 

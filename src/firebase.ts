@@ -1,9 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
-// TODO: Replace with your actual Firebase project configuration
 const firebaseConfig = {
-   apiKey: "AIzaSyBk4z6uYueay650P8Doc8UWcuQIZAeMt4U",
+  apiKey: "AIzaSyBk4z6uYueay650P8Doc8UWcuQIZAeMt4U",
   authDomain: "bina-ca5ac.firebaseapp.com",
   projectId: "bina-ca5ac",
   storageBucket: "bina-ca5ac.firebasestorage.app",

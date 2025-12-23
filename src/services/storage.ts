@@ -1,4 +1,3 @@
-
 import { User, Role, Location, Motorcycle, MotorcycleStatus, Transfer, TransferStatus, Sale, Log } from '../types';
 import { db } from '../firebase';
 import { 
@@ -10,9 +9,8 @@ import {
   updateDoc, 
   deleteDoc, 
   query, 
-  where,
-  Timestamp,
-  writeBatch
+  writeBatch,
+  getDoc
 } from 'firebase/firestore';
 
 // Mock Data for seeding
@@ -51,7 +49,7 @@ export const storageService = {
       const snapshot = await getDocs(usersRef);
       
       if (snapshot.empty) {
-        console.log("Seeding Database...");
+        console.log("Database empty. Seeding initial data...");
         const batch = writeBatch(db);
 
         // Seed Users
@@ -86,7 +84,6 @@ export const storageService = {
     return mapDocs<User>(snapshot);
   },
   addUser: async (user: User) => {
-    // If ID is provided, use setDoc, else addDoc
     if (user.id && user.id.startsWith('u_')) {
         await setDoc(doc(db, 'users', user.id), user);
     } else {
@@ -128,7 +125,6 @@ export const storageService = {
     return mapDocs<Motorcycle>(snapshot);
   },
   addMotorcycle: async (moto: Motorcycle) => {
-    // Use chassis number as ID for uniqueness
     await setDoc(doc(db, 'motorcycles', moto.chassisNumber), moto);
     await storageService.logAction('System', `Imported motorcycle ${moto.chassisNumber}`);
   },
@@ -168,17 +164,8 @@ export const storageService = {
     await updateDoc(ref, { status: TransferStatus.PENDING });
   },
   completeTransfer: async (transferId: string, userId: string) => {
-    // We need to fetch the transfer first to get the bikes
     const transferRef = doc(db, 'transfers', transferId);
-    // Since this is complex (read then write), we should ideally use a transaction or just fetch then write
-    // For simplicity in this demo, fetch then batch write
-    const tSnap = await getDocs(query(collection(db, 'transfers'), where('id', '==', transferId)));
-    // Firestore IDs vs Field IDs: In createTransfer we set the field ID. 
-    // However, getTransfers returns the doc ID spread. 
-    // Let's rely on the doc ID passed in.
-    
-    // Actually, createTransfer used doc(collection).id. So the doc ID IS the transfer ID.
-    const tDoc = await import('firebase/firestore').then(mod => mod.getDoc(transferRef));
+    const tDoc = await getDoc(transferRef);
     
     if (tDoc.exists()) {
        const t = tDoc.data() as Transfer;
@@ -203,19 +190,18 @@ export const storageService = {
   },
   cancelTransfer: async (transferId: string, userId: string) => {
     const transferRef = doc(db, 'transfers', transferId);
-    const tDoc = await import('firebase/firestore').then(mod => mod.getDoc(transferRef));
+    const tDoc = await getDoc(transferRef);
 
     if (tDoc.exists()) {
         const t = tDoc.data() as Transfer;
-        // Fetch Origin Location to determine status
-        const locRef = doc(db, 'locations', t.fromLocationId);
-        const locDoc = await import('firebase/firestore').then(mod => mod.getDoc(locRef));
-        const loc = locDoc.data() as Location;
-        
-        const revertedStatus = loc?.type === 'WAREHOUSE' ? MotorcycleStatus.IN_WAREHOUSE : MotorcycleStatus.AT_BRANCH;
-
         const batch = writeBatch(db);
         batch.update(transferRef, { status: TransferStatus.CANCELLED });
+
+        // Fetch Origin to be precise
+        const locRef = doc(db, 'locations', t.fromLocationId);
+        const locDoc = await getDoc(locRef);
+        const loc = locDoc.data() as Location;
+        const revertedStatus = loc?.type === 'WAREHOUSE' ? MotorcycleStatus.IN_WAREHOUSE : MotorcycleStatus.AT_BRANCH;
 
         t.chassisNumbers.forEach(cn => {
             const bikeRef = doc(db, 'motorcycles', cn);
@@ -257,7 +243,6 @@ export const storageService = {
     const saleRef = doc(db, 'sales', updatedSale.id);
     await updateDoc(saleRef, { ...updatedSale });
     
-    // Ideally we should check if price changed and update bike, but keeping it simple
     if (updatedSale.price) {
         const bikeRef = doc(db, 'motorcycles', updatedSale.chassisNumber);
         await updateDoc(bikeRef, { price: updatedSale.price });
@@ -265,28 +250,20 @@ export const storageService = {
   },
   deleteSale: async (saleId: string) => {
     const saleRef = doc(db, 'sales', saleId);
-    const sDoc = await import('firebase/firestore').then(mod => mod.getDoc(saleRef));
+    const sDoc = await getDoc(saleRef);
     
     if (sDoc.exists()) {
         const sale = sDoc.data() as Sale;
         const batch = writeBatch(db);
-        
         batch.delete(saleRef);
         
-        // Revert Bike
-        // Need to find location to revert status correctly? 
-        // We can just query the bike to see where it was supposed to be or assume 'currentLocationId' on bike is still valid (it should be, just status is SOLD)
         const bikeRef = doc(db, 'motorcycles', sale.chassisNumber);
-        const bikeDoc = await import('firebase/firestore').then(mod => mod.getDoc(bikeRef));
+        const bikeDoc = await getDoc(bikeRef);
         
         if (bikeDoc.exists()) {
             const bike = bikeDoc.data() as Motorcycle;
-            // Determine status based on location ID
-            // Ideally fetch location, but simplified:
             const status = bike.currentLocationId.includes('wh') ? MotorcycleStatus.IN_WAREHOUSE : MotorcycleStatus.AT_BRANCH;
             
-            // Delete sold fields using FieldValue.delete() in real app, here undefined/null usually ignored or merged
-            // Firestore update needs explicit delete for fields or just overwrite
             batch.update(bikeRef, {
                 status: status,
                 soldDate: null,
@@ -299,7 +276,7 @@ export const storageService = {
 
   // Logs
   getLogs: async (): Promise<Log[]> => {
-    const q = query(collection(db, 'logs')); // Sorting usually done in UI or via orderBy
+    const q = query(collection(db, 'logs'));
     const snapshot = await getDocs(q);
     const logs = mapDocs<Log>(snapshot);
     return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -315,10 +292,7 @@ export const storageService = {
 
   // Stats
   reset: async () => {
-    // Dangerous operation in cloud DB!
-    // For demo, we might just clear local storage, but now we are cloud.
-    // Let's just reload. Deleting all cloud collections is heavy.
-    if(confirm("Cloud reset not fully implemented for safety. Reloading.")) {
+    if(confirm("Full Cloud Reset is not enabled for safety. Refresh the page to attempt re-seeding if empty.")) {
         location.reload();
     }
   }

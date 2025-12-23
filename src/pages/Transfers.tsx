@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { storageService } from '../services/storage';
 import { Transfer, TransferStatus, Role, Location, Motorcycle, MotorcycleStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Check, Truck, ArrowRight, XCircle, ShieldCheck, RefreshCw } from 'lucide-react';
+import { Plus, Check, ArrowRight, XCircle, ShieldCheck, RefreshCw, Truck } from 'lucide-react';
 
 export const Transfers: React.FC = () => {
   const { user } = useAuth();
@@ -18,7 +18,21 @@ export const Transfers: React.FC = () => {
   const [availableBikes, setAvailableBikes] = useState<Motorcycle[]>([]);
 
   useEffect(() => {
-    refreshData();
+    // 1. Subscribe to Transfers (Real-time)
+    const unsubscribeTransfers = storageService.subscribeToTransfers((data) => {
+        setTransfers(data);
+        setLoading(false);
+    });
+
+    // 2. Fetch Locations (Static enough to fetch once)
+    storageService.getLocations().then(setLocations);
+
+    // Pre-select Origin for Managers
+    if ((user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.BRANCH_MANAGER) && user?.locationId) {
+        setSelectedFromLocation(user.locationId);
+    }
+
+    return () => unsubscribeTransfers();
   }, [user]);
 
   // Update available bikes when FROM location changes
@@ -27,7 +41,6 @@ export const Transfers: React.FC = () => {
         if (selectedFromLocation && user) {
             const allBikes = await storageService.getMotorcycles();
             
-            // Determine what status we look for based on role or location type
             const loc = locations.find(l => l.id === selectedFromLocation);
             const requiredStatus = loc?.type === 'WAREHOUSE' ? MotorcycleStatus.IN_WAREHOUSE : MotorcycleStatus.AT_BRANCH;
 
@@ -39,24 +52,6 @@ export const Transfers: React.FC = () => {
     loadBikes();
   }, [selectedFromLocation, user, locations]);
 
-  const refreshData = async () => {
-    setLoading(true);
-    try {
-        const [t, l] = await Promise.all([
-            storageService.getTransfers(),
-            storageService.getLocations()
-        ]);
-        setTransfers(t);
-        setLocations(l);
-        
-        // Pre-select Origin for Managers
-        if ((user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.BRANCH_MANAGER) && user.locationId) {
-          setSelectedFromLocation(user.locationId);
-        }
-    } catch(e) { console.error(e) }
-    finally { setLoading(false); }
-  };
-
   const handleCreateTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -64,10 +59,12 @@ export const Transfers: React.FC = () => {
     const fromId = (user.role === Role.ADMIN) ? selectedFromLocation : user.locationId;
     if (!fromId || !selectedToLocation || selectedBikes.length === 0) return;
 
-    // Determine initial status:
-    const initialStatus = user.role === Role.BRANCH_MANAGER 
-        ? TransferStatus.PENDING_APPROVAL 
-        : TransferStatus.PENDING;
+    let initialStatus = TransferStatus.PENDING; // Default to "In Transit"
+    
+    // If Branch Manager initiates, it requires approval
+    if (user.role === Role.BRANCH_MANAGER) {
+        initialStatus = TransferStatus.PENDING_APPROVAL;
+    }
 
     const newTransfer: Transfer = {
       id: `tr_${Date.now()}`,
@@ -81,8 +78,8 @@ export const Transfers: React.FC = () => {
     };
 
     await storageService.createTransfer(newTransfer);
-    await storageService.logAction(user.id, `Created transfer ${newTransfer.reference} (${initialStatus})`);
-    await refreshData();
+    await storageService.logAction(user.id, `Created transfer ${newTransfer.reference}`);
+    
     setShowModal(false);
     setSelectedBikes([]);
     if (user.role === Role.ADMIN) setSelectedFromLocation('');
@@ -91,16 +88,16 @@ export const Transfers: React.FC = () => {
 
   const handleReceive = async (transferId: string) => {
     if (!user) return;
-    await storageService.completeTransfer(transferId, user.id);
-    await storageService.logAction(user.id, `Received/Confirmed transfer ${transferId}`);
-    refreshData();
+    if(confirm("Confirm that you have received these items? This will update inventory.")) {
+        await storageService.completeTransfer(transferId, user.id);
+        await storageService.logAction(user.id, `Received & Approved transfer ${transferId}`);
+    }
   };
 
   const handleApprove = async (transferId: string) => {
       if (!user) return;
       await storageService.approveTransfer(transferId, user.id);
       await storageService.logAction(user.id, `Approved transfer ${transferId}`);
-      refreshData();
   };
 
   const handleCancel = async (transferId: string) => {
@@ -108,7 +105,6 @@ export const Transfers: React.FC = () => {
       if (confirm("Are you sure you want to cancel this transfer? Bikes will be returned to the origin inventory.")) {
           await storageService.cancelTransfer(transferId, user.id);
           await storageService.logAction(user.id, `Cancelled transfer ${transferId}`);
-          refreshData();
       }
   };
 
@@ -123,29 +119,20 @@ export const Transfers: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Stock Transfers</h1>
-        <div className="flex gap-2">
-            <button 
-                onClick={() => refreshData()}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg dark:text-gray-300 dark:hover:bg-gray-700"
-                title="Refresh Transfers"
-            >
-                <RefreshCw size={20} />
-            </button>
-            {(user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.ADMIN || user?.role === Role.BRANCH_MANAGER) && (
-            <button 
-                onClick={() => setShowModal(true)}
-                className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
-                title="Create New Transfer"
-            >
-                <Plus size={18} className="mr-2" />
-                New Transfer
-            </button>
-            )}
-        </div>
+        {(user?.role === Role.WAREHOUSE_MANAGER || user?.role === Role.ADMIN || user?.role === Role.BRANCH_MANAGER) && (
+          <button 
+            onClick={() => setShowModal(true)}
+            className="flex items-center px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg"
+            title="Create New Transfer"
+          >
+            <Plus size={18} className="mr-2" />
+            New Transfer
+          </button>
+        )}
       </div>
 
       <div className="grid gap-4">
-        {loading ? <p>Loading transfers...</p> : relevantTransfers.map(t => (
+        {loading ? <p>Loading real-time transfers...</p> : relevantTransfers.map(t => (
           <div key={t.id} className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 mb-2">
@@ -156,7 +143,7 @@ export const Transfers: React.FC = () => {
                   ${t.status === TransferStatus.PENDING_APPROVAL ? 'bg-orange-100 text-orange-700' : ''}
                   ${t.status === TransferStatus.CANCELLED ? 'bg-red-100 text-red-700' : ''}
                 `}>
-                  {t.status.replace('_', ' ')}
+                  {t.status === TransferStatus.PENDING ? 'IN TRANSIT' : t.status.replace('_', ' ')}
                 </span>
               </div>
               <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-2">
@@ -165,7 +152,7 @@ export const Transfers: React.FC = () => {
                 <span>{getLocationName(t.toLocationId)}</span>
               </p>
               <div className="mt-2">
-                  <span className="text-xs font-medium text-gray-500 uppercase">Chassis Numbers:</span>
+                  <span className="text-xs font-medium text-gray-500 uppercase">Chassis Numbers ({t.chassisNumbers.length}):</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                       {t.chassisNumbers.map(cn => (
                           <span key={cn} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded text-xs">{cn}</span>
@@ -176,60 +163,56 @@ export const Transfers: React.FC = () => {
             </div>
             
             <div className="flex gap-2">
-                {t.status === TransferStatus.PENDING_APPROVAL && (
+                {/* BRANCH MANAGER ACTIONS */}
+                {user?.role === Role.BRANCH_MANAGER && (
                     <>
-                        {user?.role === Role.ADMIN ? (
+                        {/* Only Receive if it is In Transit to ME */}
+                        {t.status === TransferStatus.PENDING && t.toLocationId === user.locationId && (
                             <button 
-                                onClick={() => handleApprove(t.id)}
-                                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center shrink-0"
-                                title="Approve Transfer"
+                                onClick={() => handleReceive(t.id)}
+                                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center justify-center shrink-0 shadow-sm"
+                                title="Confirm Receipt"
                             >
-                                <ShieldCheck size={18} className="mr-2" />
-                                Approve
+                                <Check size={18} className="mr-2" />
+                                Receive & Approve
                             </button>
-                        ) : (
-                            <span className="px-3 py-2 text-sm text-gray-500 italic bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-100 dark:border-gray-600">
-                                Waiting for Admin
-                            </span>
                         )}
                     </>
                 )}
 
-                {t.status === TransferStatus.PENDING && (
+                {/* ADMIN ACTIONS */}
+                {user?.role === Role.ADMIN && (
                     <>
-                        {((user?.role === Role.BRANCH_MANAGER && t.toLocationId === user.locationId) || user?.role === Role.ADMIN) && (
-                            <button 
-                                onClick={() => handleReceive(t.id)}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center shrink-0"
-                                title="Confirm Receipt"
-                            >
-                                <Check size={18} className="mr-2" />
-                                Confirm Receipt
+                        {t.status === TransferStatus.PENDING_APPROVAL && (
+                            <button onClick={() => handleApprove(t.id)} className="px-4 py-2 bg-green-600 text-white rounded-lg flex items-center">
+                                <ShieldCheck size={18} className="mr-2" /> Approve
+                            </button>
+                        )}
+                        
+                        {/* Admin can see and Force Receive pending items */}
+                        {t.status === TransferStatus.PENDING && (
+                            <button onClick={() => handleReceive(t.id)} className="px-3 py-2 bg-blue-600 text-white rounded-lg flex items-center text-sm" title="Force Complete Transfer">
+                                <Check size={16} className="mr-2" /> Approve & Finalize
+                            </button>
+                        )}
+
+                        {(t.status === TransferStatus.PENDING || t.status === TransferStatus.PENDING_APPROVAL) && (
+                            <button onClick={() => handleCancel(t.id)} className="px-3 py-2 bg-red-100 text-red-700 border border-red-200 rounded-lg flex items-center text-sm">
+                                <XCircle size={16} className="mr-2" /> Cancel
                             </button>
                         )}
                     </>
                 )}
-                
-                {user?.role === Role.ADMIN && (t.status === TransferStatus.PENDING || t.status === TransferStatus.PENDING_APPROVAL) && (
-                        <button 
-                        onClick={() => handleCancel(t.id)}
-                        className="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg flex items-center justify-center shrink-0 border border-red-200"
-                        title="Cancel Transfer"
-                    >
-                        <XCircle size={18} className="mr-2" />
-                        Cancel
-                    </button>
-                )}
             </div>
           </div>
         ))}
-        {!loading && relevantTransfers.length === 0 && <p className="text-gray-500">No transfers found.</p>}
+        {!loading && relevantTransfers.length === 0 && <p className="text-gray-500">No transfers found for your location.</p>}
       </div>
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4 dark:text-white">Create Transfer</h2>
+            <h2 className="text-xl font-bold mb-4 dark:text-white">Create Stock Transfer</h2>
             <form onSubmit={handleCreateTransfer} className="space-y-4">
               
               {user?.role === Role.ADMIN && (
@@ -305,7 +288,7 @@ export const Transfers: React.FC = () => {
               <div className="flex justify-end gap-3 mt-6">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
                 <button type="submit" className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700" disabled={selectedBikes.length === 0}>
-                  {user?.role === Role.BRANCH_MANAGER ? 'Request Transfer' : 'Initiate Transfer'}
+                  {user?.role === Role.BRANCH_MANAGER ? 'Request Transfer' : 'Initiate & Send'}
                 </button>
               </div>
             </form>

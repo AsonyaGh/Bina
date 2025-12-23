@@ -10,7 +10,8 @@ import {
   deleteDoc, 
   query, 
   writeBatch,
-  getDoc
+  getDoc,
+  onSnapshot
 } from 'firebase/firestore';
 
 // Mock Data for seeding
@@ -36,13 +37,12 @@ const MOCK_BIKES: Motorcycle[] = Array.from({ length: 20 }).map((_, i) => ({
   importDate: new Date().toISOString(),
 }));
 
-// Helper to map Firestore docs
 const mapDocs = <T>(snapshot: any): T[] => {
   return snapshot.docs.map((d: any) => ({ ...d.data(), id: d.id })) as T[];
 };
 
 export const storageService = {
-  // Initialization
+  // Initialization & Seeding
   init: async () => {
     try {
       const usersRef = collection(db, 'users');
@@ -52,23 +52,9 @@ export const storageService = {
         console.log("Database empty. Seeding initial data...");
         const batch = writeBatch(db);
 
-        // Seed Users
-        MOCK_USERS.forEach(u => {
-          const ref = doc(db, 'users', u.id);
-          batch.set(ref, u);
-        });
-
-        // Seed Locations
-        MOCK_LOCATIONS.forEach(l => {
-          const ref = doc(db, 'locations', l.id);
-          batch.set(ref, l);
-        });
-
-        // Seed Bikes - Use chassis as ID
-        MOCK_BIKES.forEach(b => {
-          const ref = doc(db, 'motorcycles', b.chassisNumber);
-          batch.set(ref, b);
-        });
+        MOCK_USERS.forEach(u => batch.set(doc(db, 'users', u.id), u));
+        MOCK_LOCATIONS.forEach(l => batch.set(doc(db, 'locations', l.id), l));
+        MOCK_BIKES.forEach(b => batch.set(doc(db, 'motorcycles', b.chassisNumber), b));
 
         await batch.commit();
         console.log("Database seeded successfully.");
@@ -78,38 +64,31 @@ export const storageService = {
     }
   },
 
-  // Users
+  // --- Users ---
   getUsers: async (): Promise<User[]> => {
     const snapshot = await getDocs(collection(db, 'users'));
     return mapDocs<User>(snapshot);
   },
   addUser: async (user: User) => {
-    if (user.id && user.id.startsWith('u_')) {
-        await setDoc(doc(db, 'users', user.id), user);
-    } else {
-        await addDoc(collection(db, 'users'), user);
-    }
+    const ref = user.id ? doc(db, 'users', user.id) : doc(collection(db, 'users'));
+    await setDoc(ref, { ...user, id: ref.id });
   },
   updateUser: async (user: User) => {
     if (!user.id) return;
-    const ref = doc(db, 'users', user.id);
-    await updateDoc(ref, { ...user });
+    await updateDoc(doc(db, 'users', user.id), { ...user });
   },
   deleteUser: async (id: string) => {
     await deleteDoc(doc(db, 'users', id));
   },
 
-  // Locations
+  // --- Locations ---
   getLocations: async (): Promise<Location[]> => {
     const snapshot = await getDocs(collection(db, 'locations'));
     return mapDocs<Location>(snapshot);
   },
   addLocation: async (location: Location) => {
-     if (location.id) {
-        await setDoc(doc(db, 'locations', location.id), location);
-     } else {
-        await addDoc(collection(db, 'locations'), location);
-     }
+    const ref = location.id ? doc(db, 'locations', location.id) : doc(collection(db, 'locations'));
+    await setDoc(ref, { ...location, id: ref.id });
   },
   updateLocation: async (location: Location) => {
     if (!location.id) return;
@@ -118,8 +97,14 @@ export const storageService = {
   deleteLocation: async (id: string) => {
     await deleteDoc(doc(db, 'locations', id));
   },
-  
-  // Motorcycles
+
+  // --- Motorcycles (Real-time) ---
+  subscribeToMotorcycles: (callback: (data: Motorcycle[]) => void) => {
+    const q = query(collection(db, 'motorcycles'));
+    return onSnapshot(q, (snapshot) => {
+        callback(mapDocs<Motorcycle>(snapshot));
+    });
+  },
   getMotorcycles: async (): Promise<Motorcycle[]> => {
     const snapshot = await getDocs(collection(db, 'motorcycles'));
     return mapDocs<Motorcycle>(snapshot);
@@ -135,33 +120,61 @@ export const storageService = {
     await deleteDoc(doc(db, 'motorcycles', chassisNumber));
   },
 
-  // Transfers
+  // --- Transfers (Real-time) ---
+  subscribeToTransfers: (callback: (data: Transfer[]) => void) => {
+    const q = query(collection(db, 'transfers'));
+    return onSnapshot(q, (snapshot) => {
+        // Sort by date descending
+        const data = mapDocs<Transfer>(snapshot).sort((a,b) => 
+            new Date(b.dateInitiated).getTime() - new Date(a.dateInitiated).getTime()
+        );
+        callback(data);
+    });
+  },
   getTransfers: async (): Promise<Transfer[]> => {
-    const snapshot = await getDocs(collection(db, 'transfers'));
-    return mapDocs<Transfer>(snapshot);
+     const snapshot = await getDocs(collection(db, 'transfers'));
+     return mapDocs<Transfer>(snapshot);
   },
   createTransfer: async (transfer: Transfer) => {
     const batch = writeBatch(db);
     
-    // Create Transfer Record
-    const transferRef = doc(collection(db, 'transfers'));
-    const transferWithId = { ...transfer, id: transferRef.id }; // Ensure ID matches
-    batch.set(transferRef, transferWithId);
+    // Create Transfer
+    const transferRef = doc(db, 'transfers', transfer.id);
+    batch.set(transferRef, transfer);
     
-    // Update bikes to IN_TRANSIT
-    transfer.chassisNumbers.forEach(cn => {
-      const bikeRef = doc(db, 'motorcycles', cn);
-      batch.update(bikeRef, { 
-        status: MotorcycleStatus.IN_TRANSIT,
-        currentLocationId: 'TRANSIT'
-      });
-    });
+    // If it's already "IN_TRANSIT" (PENDING), assume items left the origin immediately
+    if (transfer.status === TransferStatus.PENDING) {
+        transfer.chassisNumbers.forEach(cn => {
+            const bikeRef = doc(db, 'motorcycles', cn);
+            batch.update(bikeRef, { 
+                status: MotorcycleStatus.IN_TRANSIT,
+                currentLocationId: 'TRANSIT'
+            });
+        });
+    }
 
     await batch.commit();
   },
   approveTransfer: async (transferId: string, userId: string) => {
-    const ref = doc(db, 'transfers', transferId);
-    await updateDoc(ref, { status: TransferStatus.PENDING });
+    // Approve Request (Branch -> Warehouse flow usually) or just Admin approval
+    const transferRef = doc(db, 'transfers', transferId);
+    const batch = writeBatch(db);
+
+    batch.update(transferRef, { status: TransferStatus.PENDING }); // Set to In Transit
+
+    // We must fetch transfer to get bikes to move them to TRANSIT status
+    const tDoc = await getDoc(transferRef);
+    if(tDoc.exists()) {
+        const t = tDoc.data() as Transfer;
+        t.chassisNumbers.forEach(cn => {
+            const bikeRef = doc(db, 'motorcycles', cn);
+            batch.update(bikeRef, {
+                status: MotorcycleStatus.IN_TRANSIT,
+                currentLocationId: 'TRANSIT'
+            });
+        });
+    }
+    await batch.commit();
   },
   completeTransfer: async (transferId: string, userId: string) => {
     const transferRef = doc(db, 'transfers', transferId);
@@ -197,7 +210,7 @@ export const storageService = {
         const batch = writeBatch(db);
         batch.update(transferRef, { status: TransferStatus.CANCELLED });
 
-        // Fetch Origin to be precise
+        // Fetch Origin to revert status correctly
         const locRef = doc(db, 'locations', t.fromLocationId);
         const locDoc = await getDoc(locRef);
         const loc = locDoc.data() as Location;
@@ -215,7 +228,16 @@ export const storageService = {
     }
   },
 
-  // Sales
+  // --- Sales (Real-time) ---
+  subscribeToSales: (callback: (data: Sale[]) => void) => {
+    const q = query(collection(db, 'sales'));
+    return onSnapshot(q, (snapshot) => {
+        const data = mapDocs<Sale>(snapshot).sort((a,b) => 
+            new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        callback(data);
+    });
+  },
   getSales: async (): Promise<Sale[]> => {
     const snapshot = await getDocs(collection(db, 'sales'));
     return mapDocs<Sale>(snapshot);
@@ -223,12 +245,9 @@ export const storageService = {
   createSale: async (sale: Sale) => {
     const batch = writeBatch(db);
     
-    // Create Sale
-    const saleRef = doc(collection(db, 'sales'));
-    const saleWithId = { ...sale, id: saleRef.id };
-    batch.set(saleRef, saleWithId);
+    const saleRef = doc(db, 'sales', sale.id);
+    batch.set(saleRef, sale);
 
-    // Update Bike
     const bikeRef = doc(db, 'motorcycles', sale.chassisNumber);
     batch.update(bikeRef, {
         status: MotorcycleStatus.SOLD,
@@ -262,6 +281,8 @@ export const storageService = {
         
         if (bikeDoc.exists()) {
             const bike = bikeDoc.data() as Motorcycle;
+            // Determine logical status based on location ID naming convention or lookup
+            // Simplification: if it contains 'wh' -> Warehouse, else Branch
             const status = bike.currentLocationId.includes('wh') ? MotorcycleStatus.IN_WAREHOUSE : MotorcycleStatus.AT_BRANCH;
             
             batch.update(bikeRef, {
@@ -274,7 +295,15 @@ export const storageService = {
     }
   },
 
-  // Logs
+  // --- Logs (Real-time) ---
+  subscribeToLogs: (callback: (data: Log[]) => void) => {
+      const q = query(collection(db, 'logs'));
+      return onSnapshot(q, (snapshot) => {
+          callback(mapDocs<Log>(snapshot).sort((a,b) => 
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          ));
+      });
+  },
   getLogs: async (): Promise<Log[]> => {
     const q = query(collection(db, 'logs'));
     const snapshot = await getDocs(q);
@@ -290,9 +319,9 @@ export const storageService = {
     });
   },
 
-  // Stats
+  // Reset
   reset: async () => {
-    if(confirm("Full Cloud Reset is not enabled for safety. Refresh the page to attempt re-seeding if empty.")) {
+    if(confirm("To re-seed the Cloud Database, you must manually delete collections in Firebase Console. Refreshing page to attempt seed if empty.")) {
         location.reload();
     }
   }

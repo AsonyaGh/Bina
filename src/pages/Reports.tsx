@@ -11,28 +11,19 @@ export const Reports: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
   const [bikes, setBikes] = useState<Motorcycle[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const loadData = async () => {
-        setLoading(true);
-        try {
-            const [l, t, s, b, locs] = await Promise.all([
-                storageService.getLogs(),
-                storageService.getTransfers(),
-                storageService.getSales(),
-                storageService.getMotorcycles(),
-                storageService.getLocations()
-            ]);
-            setLogs(l);
-            setTransfers(t);
-            setSales(s);
-            setBikes(b);
-            setLocations(locs);
-        } catch(e) { console.error(e) }
-        finally { setLoading(false); }
-    };
-    if (user) loadData();
+    if (user) {
+        // Subscriptions
+        const u1 = storageService.subscribeToLogs(setLogs);
+        const u2 = storageService.subscribeToTransfers(setTransfers);
+        const u3 = storageService.subscribeToSales(setSales);
+        const u4 = storageService.subscribeToMotorcycles(setBikes);
+        // Static Fetch
+        storageService.getLocations().then(setLocations);
+
+        return () => { u1(); u2(); u3(); u4(); };
+    }
   }, [user]);
 
   // 1. Filter Data Based on Role & Location
@@ -69,7 +60,6 @@ export const Reports: React.FC = () => {
   };
 
   if (!user) return null;
-  if (loading) return <div className="p-6">Loading reports...</div>;
 
   return (
     <div className="space-y-8">

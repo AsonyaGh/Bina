@@ -24,12 +24,28 @@ export const Sales: React.FC = () => {
   const [price, setPrice] = useState('');
 
   useEffect(() => {
-    refreshData();
+    // Subscribe to Sales
+    const unsubSales = storageService.subscribeToSales(setSales);
+    
+    // Fetch static locations
+    storageService.getLocations().then(setLocations);
+    setLoading(false);
+
+    // Initial Bikes fetch based on user
+    if (user?.locationId) {
+        setTargetBranchId(user.locationId);
+        updateAvailableBikesForLocation(user.locationId);
+    } else {
+        // Admin gets empty initially
+        setAvailableBikes([]);
+    }
+
+    return () => unsubSales();
   }, [user]);
 
-  // Update available bikes when Admin changes the target branch
+  // Update available bikes when branch changes
   useEffect(() => {
-    if (user?.role === Role.ADMIN && targetBranchId) {
+    if (targetBranchId) {
         updateAvailableBikesForLocation(targetBranchId);
     }
   }, [targetBranchId]);
@@ -41,32 +57,9 @@ export const Sales: React.FC = () => {
       ));
   };
 
-  const refreshData = async () => {
-    setLoading(true);
-    try {
-        const [fetchedSales, allBikes, fetchedLocations] = await Promise.all([
-            storageService.getSales(),
-            storageService.getMotorcycles(),
-            storageService.getLocations()
-        ]);
-        setSales(fetchedSales);
-        setLocations(fetchedLocations);
-        
-        // If regular user, set their location immediately
-        if (user?.locationId) {
-          setTargetBranchId(user.locationId);
-          setAvailableBikes(allBikes.filter(b => 
-            b.currentLocationId === user.locationId && b.status === MotorcycleStatus.AT_BRANCH
-          ));
-        }
-    } catch(e) { console.error(e) }
-    finally { setLoading(false); }
-  };
-
   const openNewSaleModal = () => {
       setIsEditing(false);
       setEditingSaleId(null);
-      // If admin, reset branch selection to force them to choose
       if (user?.role === Role.ADMIN) {
           setTargetBranchId('');
           setAvailableBikes([]);
@@ -81,7 +74,7 @@ export const Sales: React.FC = () => {
   const openEditModal = (sale: Sale) => {
       setIsEditing(true);
       setEditingSaleId(sale.id);
-      setTargetBranchId(sale.branchId); // For admin context
+      setTargetBranchId(sale.branchId);
       setSelectedBike(sale.chassisNumber);
       setCustomerName(sale.customerName);
       setCustomerPhone(sale.customerPhone);
@@ -90,10 +83,9 @@ export const Sales: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
-      if(confirm("Are you sure you want to delete this sale? The bike will be returned to inventory.")) {
+      if(confirm("Are you sure? Bike will return to inventory.")) {
           await storageService.deleteSale(id);
           await storageService.logAction(user?.id || 'system', `Deleted sale record ${id}`);
-          refreshData();
       }
   };
 
@@ -101,9 +93,7 @@ export const Sales: React.FC = () => {
     e.preventDefault();
     if (!user) return;
 
-    // Determine the branch ID
     const saleBranchId = user.role === Role.ADMIN ? targetBranchId : user.locationId;
-
     if (!saleBranchId) {
         alert("Branch location is required.");
         return;
@@ -120,8 +110,7 @@ export const Sales: React.FC = () => {
             price: Number(price),
         };
         await storageService.updateSale(updatedSale);
-        await storageService.logAction(user.id, `Updated sale details for ${customerName}`);
-
+        await storageService.logAction(user.id, `Updated sale ${customerName}`);
     } else {
         const newSale: Sale = {
             id: `sale_${Date.now()}`,
@@ -134,10 +123,9 @@ export const Sales: React.FC = () => {
             date: new Date().toISOString()
         };
         await storageService.createSale(newSale);
-        await storageService.logAction(user.id, `Sold bike ${selectedBike} to ${customerName}`);
+        await storageService.logAction(user.id, `Sold bike ${selectedBike}`);
     }
-
-    await refreshData();
+    
     setShowModal(false);
     setSelectedBike('');
     setCustomerName('');
@@ -164,13 +152,6 @@ export const Sales: React.FC = () => {
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Sales Records</h1>
         <div className="flex gap-2">
-            <button 
-                onClick={() => refreshData()}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg dark:text-gray-300 dark:hover:bg-gray-700"
-                title="Refresh Data"
-            >
-                <RefreshCw size={20} />
-            </button>
             {(user?.role === Role.SALES_OFFICER || user?.role === Role.BRANCH_MANAGER || user?.role === Role.ADMIN) && (
             <button 
                 onClick={openNewSaleModal}
